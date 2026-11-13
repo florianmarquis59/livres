@@ -1,5 +1,5 @@
 // Service worker : l'app s'ouvre sans réseau. Les données passent par l'app (localStorage), pas par ce cache.
-const CACHE = 'livres-v2';
+const CACHE = 'livres-v3';
 const FICHIERS = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

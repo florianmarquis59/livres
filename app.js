@@ -321,7 +321,7 @@ function segment(nom, valeurs, actuelle) {
 }
 
 function lienRechercheBabelio(l) {
-  return 'https://www.babelio.com/resrecherche.php?Recherche=' + encodeURIComponent([l.titre || l.titre_vo, nomNaturel(l.auteur || '')].join(' ').trim());
+  return 'https://www.google.com/search?q=' + encodeURIComponent('site:babelio.com/livres ' + [l.titre || l.titre_vo, nomNaturel(l.auteur || '')].join(' ').trim());
 }
 
 function ouvrirLivre(id, preRempli) {
@@ -575,7 +575,7 @@ function ouvrirAjoutAuteur() {
     </form>`;
   f.querySelector('[data-fermer]').onclick = () => f.close();
   const form = $('#aa-form', f);
-  form.nom.oninput = () => { $('#aa-cherche', f).href = 'https://www.babelio.com/resrecherche.php?Recherche=' + encodeURIComponent(form.nom.value.trim()); };
+  form.nom.oninput = () => { $('#aa-cherche', f).href = 'https://www.google.com/search?q=' + encodeURIComponent('site:babelio.com/auteur ' + form.nom.value.trim()); };
   form.onsubmit = async (e) => {
     e.preventDefault();
     const url = form.babelio.value.trim();
@@ -605,7 +605,7 @@ function ouvrirAuteur(nom) {
         <label class="champ">Page Babelio de l'auteur (sert à trouver les notes de ses livres)
           <input id="au-babelio" type="url" inputmode="url" value="${esc(a.babelio_url || '')}" placeholder="https://www.babelio.com/auteur/…"></label>
         <div class="btns">
-          <a class="btn petit" target="_blank" rel="noopener" href="https://www.babelio.com/resrecherche.php?Recherche=${encodeURIComponent(nomNaturel(nom))}">🔎 Chercher sur Babelio</a>
+          <a class="btn petit" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent('site:babelio.com/auteur ' + nomNaturel(nom))}">🔎 Chercher sur Babelio</a>
           <button class="btn petit principal" type="button" id="au-save" ${connecte() ? '' : 'disabled'}>Enregistrer le lien</button>
           <button class="btn petit" type="button" id="au-reimp" ${connecte() ? '' : 'disabled'}>↻ Réimporter la bibliographie</button>
         </div>
