@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ma bibliothèque</title>
+  <meta name="description" content="Mes livres, mes sagas, mes lectures.">
+  <meta name="theme-color" content="#5b4636">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="barre">
+    <h1 id="titre-vue">Ma bibliothèque</h1>
+    <button id="etat-sync" class="etat" type="button" title="Synchroniser">…</button>
+  </header>
+
+  <div id="bandeau" class="bandeau" hidden></div>
+
+  <main id="vue"></main>
+
+  <button id="fab" class="fab" type="button" aria-label="Ajouter un livre" hidden>+</button>
+
+  <nav class="onglets" aria-label="Navigation">
+    <button data-vue="livres" class="actif" type="button"><span class="ico">📚</span>Livres</button>
+    <button data-vue="sagas" type="button"><span class="ico">🧭</span>Sagas</button>
+    <button data-vue="auteurs" type="button"><span class="ico">✍️</span>Auteurs</button>
+    <button data-vue="reglages" type="button"><span class="ico">⚙️</span>Réglages</button>
+  </nav>
+
+  <dialog id="feuille" class="feuille"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <datalist id="dl-auteurs"></datalist>
+  <datalist id="dl-sagas"></datalist>
+  <datalist id="dl-emplacements"></datalist>
+
+  <script src="app.js"></script>
+</body>
+</html>
