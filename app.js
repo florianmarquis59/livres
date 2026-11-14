@@ -609,6 +609,11 @@ function ouvrirAuteur(nom) {
           <button class="btn petit principal" type="button" id="au-save" ${connecte() ? '' : 'disabled'}>Enregistrer le lien</button>
           <button class="btn petit" type="button" id="au-reimp" ${connecte() ? '' : 'disabled'}>↻ Réimporter la bibliographie</button>
         </div>
+        <div class="sep"></div>
+        <div class="btns">
+          <button class="btn petit" type="button" id="au-renommer" ${connecte() ? '' : 'disabled'}>✏️ Corriger le nom</button>
+          <button class="btn petit danger" type="button" id="au-suppr" ${connecte() ? '' : 'disabled'}>🗑 Supprimer l'auteur</button>
+        </div>
       </div>
       <div class="liste">${ls.map((l) => carteLivre(l, false)).join('') || '<div class="vide">Aucun livre.</div>'}</div>
     </div>`;
@@ -621,7 +626,7 @@ function ouvrirAuteur(nom) {
       const r = await appel('majAuteur', { nom, champs: { babelio_url: url } });
       const i = etat.data.auteurs.findIndex((x) => x.nom === nom);
       if (i >= 0) etat.data.auteurs[i] = r.auteur; else etat.data.auteurs.push(r.auteur);
-      sauverData(); toast('Lien enregistré — notes mises à jour cette nuit');
+      sauverData(); toast('Lien enregistré — notes mises à jour dans l\'heure');
     } catch (e) { toast(e.message, 5000); }
   };
   $('#au-reimp', f).onclick = async (ev) => {
@@ -631,6 +636,27 @@ function ouvrirAuteur(nom) {
       etat.data.livres = r.toutes.livres; etat.data.auteurs = r.toutes.auteurs; sauverData();
       toast(r.message, 6000); ouvrirAuteur(nom); rendre(true);
     } catch (e) { toast(e.message, 5000); b.disabled = false; b.textContent = '↻ Réimporter la bibliographie'; }
+  };
+  $('#au-renommer', f).onclick = async (ev) => {
+    const nouveau = (prompt(`Nom correct de l'auteur (NOM Prénom) :\nses ${ls.length} livres seront renommés et sa bibliographie réimportée.`, nom) || '').trim();
+    if (!nouveau || nouveau === nom) return;
+    const b = ev.currentTarget; b.disabled = true; b.textContent = 'Correction et import…';
+    try {
+      const r = await appel('renommerAuteur', { ancien: nom, nouveau });
+      etat.data.livres = r.toutes.livres; etat.data.auteurs = r.toutes.auteurs; sauverData(); majDatalists();
+      toast(`${nomNaturel(r.auteur)} : ${r.message}`, 6000); ouvrirAuteur(r.auteur); rendre(true);
+    } catch (e) { toast(e.message, 5000); b.disabled = false; b.textContent = '✏️ Corriger le nom'; }
+  };
+  $('#au-suppr', f).onclick = async () => {
+    const msg = ls.length
+      ? `Supprimer ${nomNaturel(nom)} et ses ${ls.length} livres ?\nPour garder ses livres sans suivre l'auteur, marquez plutôt les livres « Non intéressé ».`
+      : `Supprimer la fiche ${nomNaturel(nom)} (aucun livre) ?`;
+    if (!confirm(msg)) return;
+    try {
+      const r = await appel('supprimerAuteur', { nom });
+      etat.data.livres = r.livres; etat.data.auteurs = r.auteurs; sauverData(); majDatalists();
+      f.close(); toast('Auteur supprimé'); rendre(true);
+    } catch (e) { toast(e.message, 5000); }
   };
   if (!f.open) f.showModal();
 }
