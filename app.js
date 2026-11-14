@@ -27,7 +27,19 @@ const PRIO_RANG = { Haute: 0, Moyenne: 1, Faible: 2, '': 3, Aucune: 4 };
 const STATUTS = ['Non lu', 'En cours', 'Lu', 'Abandonné'];
 const PRIORITES = ['Aucune', 'Faible', 'Moyenne', 'Haute'];
 
-function sauverData() { ecrireLS(CLES.data, etat.data); }
+// Champs texte : Google Sheets peut renvoyer un nombre (titre « 1991 », identifiant tout en chiffres…)
+const CHAMPS_TEXTE = ['id', 'auteur', 'saga', 'titre', 'titre_vo', 'possede', 'statut', 'priorite', 'emplacement', 'commentaire',
+  'contenu_dans', 'type_oeuvre', 'ordre_source', 'note_source', 'note_url', 'babelio_url', 'couverture', 'origine', 'wikidata', 'maj', 'note_maj'];
+function normaliserLivre(l) {
+  CHAMPS_TEXTE.forEach((c) => { if (l[c] === null || l[c] === undefined) l[c] = ''; else if (typeof l[c] !== 'string') l[c] = String(l[c]); });
+  return l;
+}
+function normaliserData() {
+  (etat.data.livres || []).forEach(normaliserLivre);
+  (etat.data.auteurs || []).forEach((a) => ['nom', 'babelio_url', 'message', 'biblio_statut'].forEach((c) => { a[c] = a[c] == null ? '' : String(a[c]); }));
+}
+function sauverData() { normaliserData(); ecrireLS(CLES.data, etat.data); }
+normaliserData();
 function sauverUI() { ecrireLS(CLES.ui, { vue: etat.ui.vue, f: etat.ui.f || {}, tri: etat.ui.tri }); }
 function connecte() { return !!(etat.config.url && etat.config.cle); }
 
@@ -36,7 +48,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const vrai = (v) => v === true || String(v).toUpperCase() === 'TRUE' || v === 'VRAI';
 const norm = (s) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/œ/g, 'oe');
-const nouvelId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/-/g, '').slice(0, 10);
+const nouvelId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()).replace(/-/g, '').slice(0, 10).replace(/^/, 'L');
 const fmtNote = (n) => (n === '' || n == null || isNaN(Number(n)) ? '' : Number(n).toFixed(2).replace('.', ','));
 const fmtOrdre = (o) => (o === '' || o == null ? '' : String(o).replace('.', ','));
 const nomNaturel = (nom) => {
@@ -59,7 +71,7 @@ function livresVisibles() { return etat.data.livres.filter((l) => !vrai(l.suppri
 function livre(id) { return etat.data.livres.find((l) => l.id === id); }
 
 function trierLivres(liste, tri) {
-  const parAuteur = (a, b) => a.auteur.localeCompare(b.auteur, 'fr') || (a.saga || '').localeCompare(b.saga || '', 'fr') ||
+  const parAuteur = (a, b) => String(a.auteur).localeCompare(String(b.auteur), 'fr') || String(a.saga || '').localeCompare(String(b.saga || ''), 'fr') ||
     (Number(a.ordre) || 999) - (Number(b.ordre) || 999) || (Number(a.annee_pub) || 9999) - (Number(b.annee_pub) || 9999) ||
     String(a.titre).localeCompare(String(b.titre), 'fr');
   const fns = {
@@ -461,7 +473,7 @@ function ouvrirLivre(id, preRempli) {
   const tomes = existant ? trierLivres(enfants(l.id), 'auteur') : [];
   // volumes possibles (même auteur, pas lui-même ni un de ses tomes) ; les intégrales d'abord
   const volumes = livresVisibles().filter((x) => x.auteur === l.auteur && x.id !== l.id && x.contenu_dans !== l.id && !x.contenu_dans)
-    .sort((a, b) => (enfants(b.id).length - enfants(a.id).length) || (b.titre.includes('/') - a.titre.includes('/')) || a.titre.localeCompare(b.titre, 'fr'));
+    .sort((a, b) => (enfants(b.id).length - enfants(a.id).length) || (String(b.titre).includes('/') - String(a.titre).includes('/')) || String(a.titre).localeCompare(String(b.titre), 'fr'));
   const ordreAuto = { Wikidata: 'de parution (Wikidata)', 'Estimé': "estimé d'après l'année de parution", Excel: 'repris de votre Excel' }[l.ordre_source] || '';
 
   f.innerHTML = `
@@ -625,7 +637,7 @@ function vueSagas(el) {
     const k = l.auteur + '§' + l.saga;
     (groupes[k] = groupes[k] || { auteur: l.auteur, saga: l.saga, livres: [] }).livres.push(l);
   });
-  const liste = Object.values(groupes).sort((a, b) => a.auteur.localeCompare(b.auteur, 'fr') || a.saga.localeCompare(b.saga, 'fr'));
+  const liste = Object.values(groupes).sort((a, b) => String(a.auteur).localeCompare(String(b.auteur), 'fr') || String(a.saga).localeCompare(String(b.saga), 'fr'));
   if (!liste.length) { el.innerHTML = '<div class="vide">Aucune saga pour l\'instant.</div>'; return; }
   const icone = (l) => (l.statut === 'Lu' ? '✅' : l.statut === 'En cours' ? '📖' : l.statut === 'Abandonné' ? '✖️' : possede(l) === 'Oui' ? '📕' : possede(l) === '?' ? '❔' : '🛒');
 
