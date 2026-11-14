@@ -17,7 +17,7 @@ const etat = {
   config: lireLS(CLES.config, { url: '', cle: '' }),
   data: lireLS(CLES.data, { livres: [], auteurs: [], serveur: '', dernierSync: '' }),
   attente: lireLS(CLES.attente, {}),        // id -> livre modifié en attente d'envoi
-  ui: Object.assign({ vue: 'livres', filtre: 'tous', tri: 'auteur', recherche: '' }, lireLS(CLES.ui, {})),
+  ui: Object.assign({ vue: 'livres', f: {}, tri: 'auteur', recherche: '' }, lireLS(CLES.ui, {})),
   sync: 'idle',                               // idle | en-cours | erreur | hors-ligne
   erreurSync: '',
 };
@@ -28,7 +28,7 @@ const STATUTS = ['Non lu', 'En cours', 'Lu', 'Abandonné'];
 const PRIORITES = ['Aucune', 'Faible', 'Moyenne', 'Haute'];
 
 function sauverData() { ecrireLS(CLES.data, etat.data); }
-function sauverUI() { ecrireLS(CLES.ui, { vue: etat.ui.vue, filtre: etat.ui.filtre, tri: etat.ui.tri }); }
+function sauverUI() { ecrireLS(CLES.ui, { vue: etat.ui.vue, f: etat.ui.f || {}, tri: etat.ui.tri }); }
 function connecte() { return !!(etat.config.url && etat.config.cle); }
 
 // ------------------------------------------------------------------ Utilitaires
@@ -83,23 +83,129 @@ function possede(l) {
   return p && !vrai(p.supprime) && p.possede === 'Oui' ? 'Oui' : l.possede;
 }
 
-const FILTRES = [
-  { id: 'tous', nom: 'Tous', f: () => true },
-  { id: 'biblio', nom: 'Ma bibliothèque', f: (l) => possede(l) === 'Oui' },
-  { id: 'alire', nom: 'À lire', f: (l) => possede(l) === 'Oui' && (l.statut === 'Non lu' || !l.statut) && !enfants(l.id).length },
-  { id: 'acheter', nom: 'Pas possédés', f: (l) => possede(l) === 'Non' },
-  { id: 'encours', nom: 'En cours', f: (l) => l.statut === 'En cours' },
-  { id: 'lus', nom: 'Lus', f: (l) => l.statut === 'Lu' },
-  { id: 'objectif', nom: 'Objectif ' + ANNEE, f: (l) => Number(l.objectif) === ANNEE },
-  { id: 'prio', nom: 'Priorité haute', f: (l) => l.priorite === 'Haute' },
-  { id: 'vendre', nom: 'À vendre', f: (l) => vrai(l.a_vendre) },
-  { id: 'pretes', nom: 'Prêtés / ailleurs', f: (l) => !!String(l.emplacement || '').trim() },
-  { id: 'doute', nom: 'Possession ?', f: (l) => possede(l) === '?' },
-  { id: 'sansnote', nom: 'Sans note', f: (l) => l.note === '' || l.note == null },
-  { id: 'nouveaux', nom: 'Importés (à trier)', f: (l) => l.origine === 'Bibliographie' && l.possede !== 'Oui' && l.statut !== 'Lu' },
-  { id: 'pasroman', nom: 'Pas des romans', f: (l) => !!l.type_oeuvre && l.type_oeuvre !== 'Roman' },
-  { id: 'nonint', nom: 'Non intéressés', f: (l) => vrai(l.non_interesse), inclutNonInteresses: true },
+// ------------------------------------------------------------------ Filtres (panneau, sélection multiple)
+// Dans une catégorie : OU (Possédé OU À vérifier). Entre catégories : ET (Possédé ET Non lu).
+const DIVERS = {
+  vendre: { nom: 'À vendre', t: (l) => vrai(l.a_vendre) },
+  ailleurs: { nom: 'Prêté / ailleurs', t: (l) => !!String(l.emplacement || '').trim() },
+  integrale: { nom: 'Dans une intégrale', t: (l) => !!l.contenu_dans },
+  commentaire: { nom: 'Avec commentaire', t: (l) => !!String(l.commentaire || '').trim() },
+  sansnote: { nom: 'Sans note', t: (l) => l.note === '' || l.note == null },
+  atrier: { nom: 'Importés, à trier', t: (l) => l.origine === 'Bibliographie' && l.possede !== 'Oui' && l.statut !== 'Lu' },
+};
+function categoriesFiltres() {
+  const annees = [...new Set(livresVisibles().map((l) => Number(l.objectif)).filter(Boolean))].sort();
+  const auteurs = [...new Set(livresVisibles().map((l) => l.auteur))].sort((a, b) => a.localeCompare(b, 'fr'));
+  return [
+    { id: 'possession', nom: 'Possession', options: [['Oui', 'Possédé'], ['Non', 'Pas possédé'], ['?', 'À vérifier']], t: (l, v) => possede(l) === v },
+    { id: 'lecture', nom: 'Lecture', options: STATUTS.map((s) => [s, s]), t: (l, v) => (l.statut || 'Non lu') === v },
+    { id: 'priorite', nom: 'Priorité', options: [['Haute', 'Haute'], ['Moyenne', 'Moyenne'], ['Faible', 'Faible'], ['Aucune', 'Aucune']],
+      t: (l, v) => (v === 'Aucune' ? !l.priorite || l.priorite === 'Aucune' : l.priorite === v) },
+    { id: 'objectif', nom: 'Objectif de lecture', options: annees.map((a) => [String(a), '🎯 ' + a]), t: (l, v) => String(l.objectif) === v },
+    { id: 'type', nom: 'Type d\'œuvre', options: [['roman', 'Romans'], ['autre', 'Essais, nouvelles…']],
+      t: (l, v) => (v === 'roman' ? !l.type_oeuvre || l.type_oeuvre === 'Roman' : !!l.type_oeuvre && l.type_oeuvre !== 'Roman') },
+    { id: 'divers', nom: 'Divers', options: Object.entries(DIVERS).map(([k, d]) => [k, d.nom]), t: (l, v) => DIVERS[v].t(l) },
+    { id: 'auteur', nom: 'Auteur', options: auteurs.map((a) => [a, nomNaturel(a)]), t: (l, v) => l.auteur === v, repliable: true },
+  ];
+}
+const NOTES_MIN = [['', 'Toutes'], ['3.5', '3,5+'], ['4', '4+'], ['4.25', '4,25+']];
+const NON_INT = [['masques', 'Masqués'], ['inclus', 'Inclus'], ['seuls', 'Seulement eux']];
+const RACCOURCIS = [
+  { nom: '📚 Ma bibliothèque', f: { possession: ['Oui'] } },
+  { nom: '📖 À lire', f: { possession: ['Oui'], lecture: ['Non lu'] } },
+  { nom: '🛒 À acheter, mieux notés', f: { possession: ['Non'], lecture: ['Non lu'] }, tri: 'note' },
+  { nom: '🎯 Objectif ' + ANNEE, f: { objectif: [String(ANNEE)] } },
 ];
+
+function filtresUI() { return etat.ui.f || (etat.ui.f = {}); }
+function nbFiltres(f = filtresUI()) {
+  return Object.entries(f).reduce((n, [k, v]) => n + (Array.isArray(v) ? v.length : (v && !(k === 'nonInt' && v === 'masques') ? 1 : 0)), 0);
+}
+/** Applique recherche + filtres. Les « non intéressés » sont exclus sauf demande explicite. */
+function filtrerLivres(f = filtresUI(), q = norm(etat.ui.recherche).trim()) {
+  const cats = categoriesFiltres();
+  return livresVisibles().filter((l) => {
+    const ni = vrai(l.non_interesse);
+    if (f.nonInt === 'seuls' ? !ni : f.nonInt !== 'inclus' && ni) return false;
+    for (const c of cats) { const sel = f[c.id]; if (sel && sel.length && !sel.some((v) => c.t(l, v))) return false; }
+    if (f.noteMin && !(Number(l.note) >= Number(f.noteMin))) return false;
+    if (q && !norm([l.titre, l.titre_vo, l.auteur, nomNaturel(l.auteur), l.saga, l.emplacement, l.commentaire].join(' ')).includes(q)) return false;
+    return true;
+  });
+}
+function libellesFiltres(f = filtresUI()) {
+  const out = [];
+  categoriesFiltres().forEach((c) => (f[c.id] || []).forEach((v) => {
+    const o = c.options.find((x) => x[0] === v);
+    out.push({ cle: c.id, v, nom: o ? o[1] : v });
+  }));
+  if (f.noteMin) out.push({ cle: 'noteMin', v: f.noteMin, nom: '★ ' + NOTES_MIN.find((x) => x[0] === f.noteMin)[1] });
+  if (f.nonInt && f.nonInt !== 'masques') out.push({ cle: 'nonInt', v: f.nonInt, nom: f.nonInt === 'seuls' ? '🚫 Non intéressés seulement' : '🚫 Non intéressés inclus' });
+  return out;
+}
+
+function ouvrirFiltres() {
+  let p = $('#panneau-filtres');
+  if (!p) { // ancien index.html encore en cache : on crée le panneau
+    p = document.createElement('dialog'); p.id = 'panneau-filtres'; p.className = 'panneau'; p.setAttribute('aria-label', 'Filtres');
+    document.body.appendChild(p);
+  }
+  const f = JSON.parse(JSON.stringify(filtresUI())); // brouillon, appliqué en direct
+  const appliquer = () => { etat.ui.f = JSON.parse(JSON.stringify(f)); sauverUI(); rendre(true); majPied(); };
+  const majPied = () => {
+    const n = filtrerLivres(f).length;
+    $('#pf-voir', p).textContent = `Voir ${n} livre${n > 1 ? 's' : ''}`;
+    $('#pf-raz', p).disabled = !nbFiltres(f);
+  };
+  const dessiner = () => {
+    const cats = categoriesFiltres();
+    const puce = (cle, v, nom, actif) => `<button type="button" class="puce${actif ? ' actif' : ''}" data-cle="${esc(cle)}" data-v="${esc(v)}">${esc(nom)}</button>`;
+    p.innerHTML = `
+      <div class="pf-entete"><h2>Filtres</h2><button class="btn petit" type="button" id="pf-raz">Tout effacer</button><button class="btn petit" type="button" id="pf-fermer" aria-label="Fermer">✕</button></div>
+      <div class="pf-corps">
+        <div class="pf-cat"><div class="pf-titre">Raccourcis</div><div class="pf-puces">
+          ${RACCOURCIS.map((r, i) => `<button type="button" class="puce raccourci" data-raccourci="${i}">${esc(r.nom)}</button>`).join('')}</div></div>
+        ${cats.filter((c) => c.options.length).map((c) => {
+          const sel = f[c.id] || [];
+          const contenu = `<div class="pf-puces">${c.options.map(([v, nom]) => puce(c.id, v, nom, sel.includes(v))).join('')}</div>`;
+          return c.repliable
+            ? `<details class="pf-cat"${sel.length ? ' open' : ''}><summary class="pf-titre">${esc(c.nom)}${sel.length ? ` <span class="pf-nb">${sel.length}</span>` : ''}</summary>${contenu}</details>`
+            : `<div class="pf-cat"><div class="pf-titre">${esc(c.nom)}</div>${contenu}</div>`;
+        }).join('')}
+        <div class="pf-cat"><div class="pf-titre">Note minimale</div>${segment('noteMin', NOTES_MIN.map((x) => x[1]), (NOTES_MIN.find((x) => x[0] === (f.noteMin || '')) || NOTES_MIN[0])[1])}</div>
+        <div class="pf-cat"><div class="pf-titre">Livres « non intéressés »</div>${segment('nonInt', NON_INT.map((x) => x[1]), (NON_INT.find((x) => x[0] === (f.nonInt || 'masques')) || NON_INT[0])[1])}</div>
+        <p class="aide">Dans une même catégorie, les choix s'additionnent (Possédé <em>ou</em> À vérifier). Entre catégories, ils se combinent (Possédé <em>et</em> Non lu).</p>
+      </div>
+      <div class="pf-pied"><button class="btn principal" type="button" id="pf-voir"></button></div>`;
+
+    p.querySelectorAll('[data-cle]').forEach((b) => (b.onclick = () => {
+      const sel = f[b.dataset.cle] || (f[b.dataset.cle] = []);
+      const i = sel.indexOf(b.dataset.v);
+      if (i >= 0) sel.splice(i, 1); else sel.push(b.dataset.v);
+      b.classList.toggle('actif', i < 0);
+      appliquer();
+    }));
+    p.querySelectorAll('[data-raccourci]').forEach((b) => (b.onclick = () => {
+      const r = RACCOURCIS[Number(b.dataset.raccourci)];
+      Object.keys(f).forEach((k) => delete f[k]);
+      Object.assign(f, JSON.parse(JSON.stringify(r.f)));
+      if (r.tri) etat.ui.tri = r.tri;
+      appliquer(); dessiner();
+    }));
+    p.querySelectorAll('[data-seg]').forEach((s) => s.querySelectorAll('button').forEach((b) => (b.onclick = () => {
+      s.querySelectorAll('button').forEach((x) => x.classList.toggle('actif', x === b));
+      const liste = s.dataset.seg === 'noteMin' ? NOTES_MIN : NON_INT;
+      f[s.dataset.seg] = liste.find((x) => x[1] === b.dataset.v)[0];
+      appliquer();
+    })));
+    $('#pf-raz', p).onclick = () => { Object.keys(f).forEach((k) => delete f[k]); appliquer(); dessiner(); };
+    $('#pf-fermer', p).onclick = () => p.close();
+    $('#pf-voir', p).onclick = () => p.close();
+    majPied();
+  };
+  dessiner();
+  p.showModal();
+}
 
 /** Applique des modifications locales et les met en file d'attente pour le serveur. */
 function modifierLivres(liste) {
@@ -246,6 +352,16 @@ function badgesLivre(l) {
   return b.join('');
 }
 
+/** Vignette de couverture (Babelio, sinon Open Library) ; à défaut, une vignette colorée avec l'initiale. */
+function couverture(l, grande) {
+  const teinte = [...String(l.saga || l.titre || '?')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+  const initiale = esc(String(l.titre || '?').replace(/^(le |la |les |l'|l’|un |une )/i, '').charAt(0).toUpperCase());
+  const vide = `<span class="couv vide${grande ? ' grande' : ''}" style="--teinte:${teinte}" aria-hidden="true">${initiale}</span>`;
+  if (!l.couverture || l.couverture === '-') return vide;
+  return `<span class="couv${grande ? ' grande' : ''}" style="--teinte:${teinte}"><img src="${esc(l.couverture)}" alt="" loading="lazy" referrerpolicy="no-referrer"
+    onerror="this.parentNode.classList.add('vide');this.parentNode.textContent='${initiale}'"></span>`;
+}
+
 function carteLivre(l, avecAuteur) {
   const sous = [];
   if (avecAuteur) sous.push(esc(nomNaturel(l.auteur)));
@@ -253,6 +369,7 @@ function carteLivre(l, avecAuteur) {
   else if (l.annee_pub) sous.push(esc(l.annee_pub));
   const note = fmtNote(l.note);
   return `<button class="livre${possede(l) === 'Non' || vrai(l.non_interesse) ? ' fantome' : ''}" type="button" data-id="${esc(l.id)}">
+    ${couverture(l)}
     <span class="t">${esc(l.titre || (l.saga ? `${l.saga} — tome ${fmtOrdre(l.ordre)}` : 'Sans titre'))}</span>
     <span class="note">${note ? '★ ' + note : ''}${note ? `<small>${esc(l.note_source || '')}${l.note_votes ? ' · ' + esc(l.note_votes) : ''}</small>` : ''}</span>
     <span class="s">${sous.join(' · ')}</span>
@@ -274,11 +391,8 @@ function blocObjectif() {
 }
 
 function vueLivres(el) {
-  const filtre = FILTRES.find((f) => f.id === etat.ui.filtre) || FILTRES[0];
-  const q = norm(etat.ui.recherche).trim();
-  let liste = (filtre.inclutNonInteresses ? livresVisibles() : livresActifs()).filter(filtre.f);
-  if (q) liste = liste.filter((l) => norm([l.titre, l.titre_vo, l.auteur, nomNaturel(l.auteur), l.saga, l.emplacement, l.commentaire].join(' ')).includes(q));
-  liste = trierLivres(liste, etat.ui.tri);
+  const liste = trierLivres(filtrerLivres(), etat.ui.tri);
+  const actifs = libellesFiltres();
 
   let html = '';
   if (etat.ui.tri === 'auteur') {
@@ -294,12 +408,16 @@ function vueLivres(el) {
 
   const vide = !etat.data.livres.length
     ? `<div class="vide"><p>Aucun livre pour l'instant.</p><p><button class="btn principal" type="button" data-aller="reglages">Connecter l'app ou importer une sauvegarde</button></p></div>`
-    : `<div class="vide">Aucun livre ne correspond.</div>`;
+    : `<div class="vide">Aucun livre ne correspond.${actifs.length ? '<p><button class="btn" type="button" id="raz-filtres">Effacer les filtres</button></p>' : ''}</div>`;
 
   el.innerHTML = `
-    ${etat.ui.filtre === 'objectif' || etat.ui.filtre === 'tous' ? blocObjectif() : ''}
-    <input class="recherche" type="search" id="recherche" placeholder="Titre, auteur, saga…" value="${esc(etat.ui.recherche)}" autocomplete="off">
-    <div class="puces">${FILTRES.map((f) => `<button class="puce${f.id === filtre.id ? ' actif' : ''}" type="button" data-filtre="${f.id}">${esc(f.nom)}</button>`).join('')}</div>
+    ${!actifs.length || (filtresUI().objectif || []).length ? blocObjectif() : ''}
+    <div class="barre-recherche">
+      <input class="recherche" type="search" id="recherche" placeholder="Titre, auteur, saga…" value="${esc(etat.ui.recherche)}" autocomplete="off">
+      <button class="btn bouton-filtres${actifs.length ? ' actif' : ''}" type="button" id="ouvrir-filtres" aria-label="Filtres">
+        <span aria-hidden="true">⚙︎</span> Filtres${actifs.length ? ` <span class="pf-nb">${actifs.length}</span>` : ''}</button>
+    </div>
+    ${actifs.length ? `<div class="puces actifs">${actifs.map((a) => `<button type="button" class="puce actif" data-retirer="${esc(a.cle)}" data-v="${esc(a.v)}">${esc(a.nom)} ✕</button>`).join('')}</div>` : ''}
     <div class="outils"><span>${liste.length} livre${liste.length > 1 ? 's' : ''}</span>
       <select id="tri" aria-label="Trier">
         ${[['auteur', 'Auteur / saga'], ['note', 'Meilleure note'], ['priorite', 'Priorité'], ['titre', 'Titre'], ['recent', 'Modifiés récemment']]
@@ -309,7 +427,13 @@ function vueLivres(el) {
 
   const r = $('#recherche', el);
   r.oninput = () => { etat.ui.recherche = r.value; const pos = r.selectionStart; vueLivres(el); const r2 = $('#recherche', el); r2.focus(); r2.setSelectionRange(pos, pos); };
-  el.querySelectorAll('[data-filtre]').forEach((b) => (b.onclick = () => { etat.ui.filtre = b.dataset.filtre; sauverUI(); vueLivres(el); }));
+  $('#ouvrir-filtres', el).onclick = ouvrirFiltres;
+  el.querySelectorAll('[data-retirer]').forEach((b) => (b.onclick = () => {
+    const f = filtresUI(), k = b.dataset.retirer;
+    if (Array.isArray(f[k])) f[k] = f[k].filter((v) => v !== b.dataset.v); else delete f[k];
+    sauverUI(); vueLivres(el);
+  }));
+  const raz = $('#raz-filtres', el); if (raz) raz.onclick = () => { etat.ui.f = {}; sauverUI(); vueLivres(el); };
   $('#tri', el).onchange = (e) => { etat.ui.tri = e.target.value; sauverUI(); vueLivres(el); };
   el.querySelectorAll('[data-id]').forEach((b) => (b.onclick = () => ouvrirLivre(b.dataset.id)));
   el.querySelectorAll('[data-aller]').forEach((b) => (b.onclick = () => allerA(b.dataset.aller)));
@@ -330,7 +454,7 @@ function ouvrirLivre(id, preRempli) {
     id: nouvelId(), auteur: '', saga: '', titre: '', titre_vo: '', ordre: '', possede: 'Oui', statut: 'Non lu', annee_lecture: '',
     priorite: '', objectif: '', emplacement: '', a_vendre: false, commentaire: '', non_interesse: false, contenu_dans: '',
     type_oeuvre: '', ordre_source: '', annee_pub: '', note: '', note_votes: '', note_source: '',
-    note_url: '', babelio_url: '', note_maj: '', origine: 'Manuel', wikidata: '', maj: '', supprime: false,
+    note_url: '', couverture: '', babelio_url: '', note_maj: '', origine: 'Manuel', wikidata: '', maj: '', supprime: false,
   }, existant || {}, preRempli || {});
   const f = $('#feuille');
   const lienFiche = l.note_url || l.babelio_url;
@@ -390,6 +514,7 @@ function ouvrirLivre(id, preRempli) {
 
       <div class="sep"></div>
       <div class="bloc-note">
+        ${couverture(l, true)}
         <div class="grande">${fmtNote(l.note) ? '★ ' + fmtNote(l.note) : '—'}</div>
         <div class="src">${l.note_source ? esc(l.note_source) : 'Pas encore de note'}${l.note_votes ? ` · ${esc(l.note_votes)} votes` : ''}
           ${l.note_maj ? `<br>mise à jour ${esc(dateCourte(l.note_maj))}` : ''}
